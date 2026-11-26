@@ -1,0 +1,27 @@
+[project]
+name = "LottoQuantPro"
+version = "1.0.2"
+description = "LottoQuant Pro - 核心量化选号与贝叶斯实战自适应移动终端"
+requires-python = ">=3.10"
+dependencies = [
+    "flet==0.25.2",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "urllib3>=2.0.0",
+    "numpy>=1.26.0",
+]
+
+[tool.flet]
+org = "com.lottoquant.pro"
+product = "LottoQuant Pro"
+company = "LottoQuant"
+copyright = "Copyright (C) 2026 LottoQuant"
+
+[tool.flet.android]
+compile_sdk_version = 35
+target_sdk_version = 34
+min_sdk_version = 24
+permissions = [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+]
