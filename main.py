@@ -879,7 +879,7 @@ class LottoQuantMobileApp:
             spacing=6,
             controls=[
                 ft.Row(spacing=6, controls=[kpi_mini_card("实盘累计投入", self.kpi_cost, TEXT_SECONDARY), kpi_mini_card("累计奖金返还", self.kpi_win, ACCENT_AMBER)]),
-                ft.Row(spacing=6, controls=[kpi_mini_card("已结纯净盈亏", self.kpi_pnl, ACCENT_GREEN), kpi_mini_card("已结回报率", self.kpi_roi, ACCENT_CYAN)]),
+                ft.Row(spacing=6, controls=[kpi_mini_card("累计纯净盈亏", self.kpi_pnl, ACCENT_GREEN), kpi_mini_card("综合回报率", self.kpi_roi, ACCENT_CYAN)]),
                 ft.Row(spacing=6, controls=[kpi_mini_card("计划胜出率", self.kpi_wr, ACCENT_CYAN), kpi_mini_card("断缆止损轮次", self.kpi_bust, ACCENT_RED)]),
             ],
         )
@@ -1535,7 +1535,8 @@ class LottoQuantMobileApp:
         self.lbl_pred_line1.value = f"🎯 {' · '.join(picks)}"
         self.lbl_pred_line2.value = f"📦 总覆盖: {total_codes} 码  |  📈 单期理论命中率: {win_rate}%"
         self.lbl_pred_line2.color = ACCENT_CYAN
-        self.page.update()
+        self.lbl_pred_line1.update()
+        self.lbl_pred_line2.update()
 
     def apply_pred_to_chase_model(self):
         if not self.filtered_rows:
@@ -1759,8 +1760,10 @@ class LottoQuantMobileApp:
             self.kpi_cost.value = "0 元"
             self.kpi_win.value = "0 元"
             self.kpi_pnl.value = "+0 元"
+            self.kpi_pnl.color = ACCENT_GREEN
             self.kpi_roi.value = "0.0%"
-            self.kpi_wr.value = "0.0%"
+            self.kpi_roi.color = ACCENT_CYAN
+            self.kpi_wr.value = "0.0% (0/0轮)"
             self.kpi_bust.value = "0 轮"
             self.lbl_next_bet_prompt.value = "当前暂无进行中的追号计划。"
             self.plan_eval_list.controls = []
@@ -1769,7 +1772,13 @@ class LottoQuantMobileApp:
             return
 
         span_mode = self.dd_live_span.value or "全周期汇总"
-        span_days_map = {"近单周 (7天)": 7, "近单月 (30天)": 30, "近季度 (90天)": 90, "近半年度 (180天)": 180, "近年度 (365天)": 365}
+        span_days_map = {
+            "近单周 (7天)": 7,
+            "近单月 (30天)": 30,
+            "近季度 (90天)": 90,
+            "近半年度 (180天)": 180,
+            "近年度 (365天)": 365,
+        }
         now_dt = datetime.now()
         report_rows = []
         for task in all_history:
@@ -1783,40 +1792,59 @@ class LottoQuantMobileApp:
             else:
                 report_rows.append(task)
 
-        total_cost, total_payout, settled_cost, settled_payout, pending_cost = 0, 0, 0, 0, 0
-        settled_tasks, win_tasks, bust_tasks, tie_tasks, pending_rounds = 0, 0, 0, 0, 0
+        total_cost = 0
+        total_payout = 0
+        win_tasks = 0
+        bust_tasks = 0
+        tie_tasks = 0
+        active_invested_tasks = 0
 
         for t in report_rows:
-            st = str(t["status"])
-            c = to_int(t["accum_cost"])
-            p = to_int(t["total_payout"])
+            st = str(t.get("status", ""))
+            c = to_int(t.get("accum_cost", 0))
+            p = to_int(t.get("total_payout", 0))
             total_cost += c
             total_payout += p
-            if "已中奖" in st or "胜出" in st:
-                settled_tasks += 1; win_tasks += 1; settled_cost += c; settled_payout += p
-            elif "断缆" in st:
-                settled_tasks += 1; bust_tasks += 1; settled_cost += c; settled_payout += p
-            elif "和局" in st or "结束" in st:
-                tie_tasks += 1; settled_cost += c; settled_payout += p
-            else:
-                pending_rounds += 1; pending_cost += c
 
-        settled_pnl = settled_payout - settled_cost
+            is_win = ("已中奖" in st) or ("胜出" in st)
+            is_bust = ("断缆" in st)
+            is_tie = ("和局" in st) or ("结束" in st)
+
+            if is_win:
+                win_tasks += 1
+                active_invested_tasks += 1
+            elif is_bust:
+                bust_tasks += 1
+                active_invested_tasks += 1
+            elif is_tie:
+                tie_tasks += 1
+            else:
+                if c > 0:
+                    active_invested_tasks += 1
+
         self.kpi_cost.value = f"{total_cost:,} 元"
         self.kpi_win.value = f"{total_payout:,} 元"
 
-        if settled_tasks == 0 and tie_tasks == 0 and pending_cost > 0:
-            self.kpi_pnl.value = f"在途 {pending_cost:,} 元"
-            self.kpi_pnl.color = ACCENT_AMBER
-            self.kpi_roi.value = "⏳ 待开奖"
-        else:
-            self.kpi_pnl.value = f"{settled_pnl:+,} 元"
-            self.kpi_pnl.color = ACCENT_GREEN if settled_pnl >= 0 else ACCENT_RED
-            roi_val = (settled_pnl / settled_cost * 100) if settled_cost > 0 else 0.0
+        net_pnl = total_payout - total_cost
+        self.kpi_pnl.value = f"{net_pnl:+,} 元"
+        self.kpi_pnl.color = ACCENT_GREEN if net_pnl >= 0 else ACCENT_RED
+
+        if total_cost > 0:
+            roi_val = (net_pnl / total_cost) * 100.0
             self.kpi_roi.value = f"{roi_val:+.1f}%"
             self.kpi_roi.color = ACCENT_GREEN if roi_val >= 0 else ACCENT_RED
+        else:
+            self.kpi_roi.value = "0.0%"
+            self.kpi_roi.color = ACCENT_CYAN
 
-        self.kpi_wr.value = f"{(win_tasks / settled_tasks * 100):.1f}% ({win_tasks}/{settled_tasks})" if settled_tasks > 0 else "⏳ 待开奖"
+        if active_invested_tasks > 0:
+            win_rate = (win_tasks / active_invested_tasks) * 100.0
+            self.kpi_wr.value = f"{win_rate:.1f}% ({win_tasks}/{active_invested_tasks}轮)"
+        elif tie_tasks > 0:
+            self.kpi_wr.value = "⏸ 仅和局"
+        else:
+            self.kpi_wr.value = "0.0% (0/0轮)"
+
         self.kpi_bust.value = f"{bust_tasks} 轮"
 
         if report_rows:
@@ -1824,33 +1852,58 @@ class LottoQuantMobileApp:
             for t in report_rows:
                 s_key = self._derive_strategy_eval_key(t)
                 if s_key not in category_stats:
-                    category_stats[s_key] = {"total": 0, "settled": 0, "win": 0, "loss": 0, "cost": 0, "s_cost": 0, "s_pay": 0}
+                    category_stats[s_key] = {
+                        "total": 0,
+                        "invested_rounds": 0,
+                        "win": 0,
+                        "loss": 0,
+                        "cost": 0,
+                        "payout": 0,
+                    }
                 st = str(t.get("status", ""))
                 c = to_int(t.get("accum_cost", 0))
                 p = to_int(t.get("total_payout", 0))
                 category_stats[s_key]["total"] += 1
                 category_stats[s_key]["cost"] += c
+                category_stats[s_key]["payout"] += p
+
                 if "已中奖" in st or "胜出" in st:
-                    category_stats[s_key]["settled"] += 1; category_stats[s_key]["win"] += 1; category_stats[s_key]["s_cost"] += c; category_stats[s_key]["s_pay"] += p
+                    category_stats[s_key]["invested_rounds"] += 1
+                    category_stats[s_key]["win"] += 1
                 elif "断缆" in st:
-                    category_stats[s_key]["settled"] += 1; category_stats[s_key]["loss"] += 1; category_stats[s_key]["s_cost"] += c; category_stats[s_key]["s_pay"] += p
+                    category_stats[s_key]["invested_rounds"] += 1
+                    category_stats[s_key]["loss"] += 1
+                elif "和局" not in st and "结束" not in st and c > 0:
+                    category_stats[s_key]["invested_rounds"] += 1
 
             for s_key, cd in category_stats.items():
-                c_pnl = cd["s_pay"] - cd["s_cost"]
-                c_wr = (cd["win"] / cd["settled"] * 100) if cd["settled"] > 0 else 0.0
+                c_pnl = cd["payout"] - cd["cost"]
+                denom_r = cd["invested_rounds"]
+                c_wr = (cd["win"] / denom_r * 100.0) if denom_r > 0 else 0.0
                 p_col = ACCENT_GREEN if c_pnl >= 0 else ACCENT_RED
                 eval_items.append(
                     ft.Container(
                         bgcolor=CARD_BG_ALT,
                         border_radius=8,
                         padding=8,
-                        content=ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
-                            ft.Column(spacing=2, expand=True, controls=[
-                                single_line_text(s_key, size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                ft.Text(f"共 {cd['total']} 轮 | 胜率 {c_wr:.1f}% ({cd['win']}/{cd['settled']}) | 投入 {cd['cost']:,}元", size=11, color=TEXT_SECONDARY),
-                            ]),
-                            single_line_text(f"{c_pnl:+,} 元", size=14, weight=ft.FontWeight.BOLD, color=p_col),
-                        ]),
+                        content=ft.Row(
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            controls=[
+                                ft.Column(
+                                    spacing=2,
+                                    expand=True,
+                                    controls=[
+                                        single_line_text(s_key, size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                        ft.Text(
+                                            f"共 {cd['total']} 轮 | 胜率 {c_wr:.1f}% ({cd['win']}/{denom_r}) | 投入 {cd['cost']:,}元 | 返还 {cd['payout']:,}元",
+                                            size=11,
+                                            color=TEXT_SECONDARY,
+                                        ),
+                                    ],
+                                ),
+                                single_line_text(f"{c_pnl:+,} 元", size=14, weight=ft.FontWeight.BOLD, color=p_col),
+                            ],
+                        ),
                     )
                 )
 
@@ -1905,15 +1958,22 @@ class LottoQuantMobileApp:
                     border=ft.border.all(1, BORDER_COLOR),
                     border_radius=10,
                     padding=10,
-                    content=ft.Column(spacing=6, controls=[
-                        ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=[
-                            ft.Container(content=single_line_text(f"#{task_id} · {task['task_name']} ({len(codes_list)}码)", size=13, weight=ft.FontWeight.BOLD, color=ACCENT_AMBER), expand=True),
-                            pill_badge(f"第 {cur_s}/{stages} 期", ACCENT_CYAN),
-                        ]),
-                        ft.Text(f"目标期号: 第 {cur_eval_period} 期 | 单码 {c_bet}元 | 已投 {cost}元 | 返还 {payout}元", size=11, color=TEXT_SECONDARY),
-                        ft.Text(f"状态: {status}", size=12, weight=ft.FontWeight.BOLD, color=st_color),
-                        ft.Row(spacing=6, controls=action_btns),
-                    ]),
+                    content=ft.Column(
+                        spacing=6,
+                        controls=[
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Container(content=single_line_text(f"#{task_id} · {task['task_name']} ({len(codes_list)}码)", size=13, weight=ft.FontWeight.BOLD, color=ACCENT_AMBER), expand=True),
+                                    pill_badge(f"第 {cur_s}/{stages} 期", ACCENT_CYAN),
+                                ],
+                            ),
+                            ft.Text(f"目标期号: 第 {cur_eval_period} 期 | 单码 {c_bet}元 | 已投 {cost}元 | 返还 {payout}元", size=11, color=TEXT_SECONDARY),
+                            ft.Text(f"状态: {status}", size=12, weight=ft.FontWeight.BOLD, color=st_color),
+                            ft.Row(spacing=6, controls=action_btns),
+                        ],
+                    ),
                 )
             )
 
